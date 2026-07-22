@@ -409,7 +409,12 @@
 <div class="backdrop" id="backdrop">
   <div class="sheet">
     <h2 id="sheetTitle">Ajouter une référence</h2>
-    <div class="field"><label for="fRef">Référence</label><input id="fRef" type="text" autocapitalize="characters" spellcheck="false" placeholder="ex : FC128x2"></div>
+    <div class="field">
+      <label for="fRef">Référence</label>
+      <input id="fRef" type="text" list="refList" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="ex : FC128x2">
+      <datalist id="refList"></datalist>
+      <div class="add-veh-hint" id="fRefHint" style="margin-top:6px"></div>
+    </div>
     <div class="field"><label for="fCat">Catégorie</label><input id="fCat" type="text" list="catList" placeholder="ex : Filtre habitacle"><datalist id="catList"></datalist></div>
     <div class="field"><label for="fQty">Quantité en stock</label><input id="fQty" type="number" inputmode="numeric" min="0" step="1" placeholder="0"></div>
     <div class="field"><label for="fBarcode">Code-barres (optionnel)</label><input id="fBarcode" type="text" inputmode="numeric" placeholder="scanné ou tapé manuellement"></div>
@@ -651,6 +656,12 @@
   function refreshCatList() {
     var cats = {}; store.items.forEach(function (it) { if (it.category) cats[it.category] = true; });
     catList.innerHTML = Object.keys(cats).sort().map(function (c) { return '<option value="' + escapeHtml(c) + '"></option>'; }).join("");
+  }
+
+  function refreshRefList() {
+    var list = document.getElementById("refList");
+    list.innerHTML = store.items.slice().sort(function (a, b) { return a.ref.localeCompare(b.ref); })
+      .map(function (it) { return '<option value="' + escapeHtml(it.ref) + '"></option>'; }).join("");
   }
 
   function refreshVehModelList() {
@@ -997,9 +1008,26 @@
   var fBarcode = document.getElementById("fBarcode");
   var pendingBarcode = "";
 
+  var fRefHint = document.getElementById("fRefHint");
+
+  function checkRefDup() {
+    if (editingId) { fRefHint.textContent = ""; return; }
+    var dup = store.items.find(function (x) { return normalize(x.ref) === normalize(fRef.value.trim()); });
+    if (dup) {
+      fRefHint.textContent = "Déjà en stock (qté actuelle : " + dup.qty + ", " + (dup.category || "sans catégorie") + ") — enregistrer mettra à jour cette pièce, pas d'en créer une nouvelle.";
+      fRefHint.style.color = "var(--accent)";
+      if (!fQty.value) fQty.value = dup.qty;
+      if (!fCat.value) fCat.value = dup.category || "";
+    } else {
+      fRefHint.textContent = "";
+    }
+  }
+
   function openSheet(id, prefillRef, prefillCat) {
     editingId = id;
     refreshCatList();
+    refreshRefList();
+    fRefHint.textContent = "";
     if (id) {
       var it = store.items.find(function (x) { return x.id === id; });
       sheetTitle.textContent = "Modifier la référence";
@@ -1008,12 +1036,14 @@
       sheetTitle.textContent = "Ajouter une référence";
       fRef.value = prefillRef || ""; fCat.value = prefillCat || (view.mode === "category" ? view.category : ""); fQty.value = "";
       fBarcode.value = pendingBarcode || "";
+      if (prefillRef) checkRefDup();
     }
     pendingBarcode = "";
     backdrop.classList.add("open");
     setTimeout(function () { (id ? fQty : fRef).focus(); }, 50);
   }
   function closeSheet() { backdrop.classList.remove("open"); editingId = null; }
+  fRef.addEventListener("input", checkRefDup);
 
   var addChoiceBackdrop = document.getElementById("addChoiceBackdrop");
   document.getElementById("addFab").addEventListener("click", function () { addChoiceBackdrop.classList.add("open"); });
@@ -1034,9 +1064,15 @@
       toast("Référence mise à jour");
     } else {
       var dup = store.items.find(function (x) { return normalize(x.ref) === normalize(ref); });
-      if (dup) { toast("Cette référence existe déjà"); return; }
-      store.items.push({ id: makeId(), ref: ref, category: cat, qty: qty, barcode: barcode, vehicles: [] });
-      toast("Référence ajoutée");
+      if (dup) {
+        dup.category = cat || dup.category;
+        dup.qty = qty;
+        if (barcode) dup.barcode = barcode;
+        toast("Référence existante mise à jour");
+      } else {
+        store.items.push({ id: makeId(), ref: ref, category: cat, qty: qty, barcode: barcode, vehicles: [] });
+        toast("Référence ajoutée");
+      }
     }
     persist(); closeSheet();
     if (searchEl.value) searchEl.value = ref; else { view.mode = "category"; view.category = cat || "Sans catégorie"; }
