@@ -320,6 +320,7 @@
     <input id="search" type="text" placeholder="Chercher une référence, toutes catégories…" autocomplete="off" autocapitalize="characters" spellcheck="false" inputmode="search">
     <button class="clear-btn" id="clearBtn" aria-label="Effacer">✕</button>
   </div>
+  <datalist id="vehModelList"></datalist>
   <div class="mode-toggle">
     <button class="active" id="modeRefBtn" type="button">Par référence</button>
     <button id="modeVehBtn" type="button">Par véhicule</button>
@@ -461,6 +462,26 @@
     return v.model + years;
   }
 
+  var ROMAN_MAP = { i: "1", ii: "2", iii: "3", iv: "4", v: "5", vi: "6", vii: "7", viii: "8", ix: "9", x: "10" };
+  function normalizeVehicleText(s) {
+    s = (s || "").toString().toLowerCase();
+    if (s.normalize) s = s.normalize("NFD").replace(/[̀-ͯ]/g, "");
+    s = s.replace(/\b(viii|vii|vi|iv|ix|x|iii|ii|i|v)\b/g, function (m) { return ROMAN_MAP[m]; });
+    return s;
+  }
+  function vehicleTokens(q) {
+    return normalizeVehicleText(q).replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter(Boolean);
+  }
+  function vehicleHay(model) {
+    return normalizeVehicleText(model).replace(/[^a-z0-9]/g, "");
+  }
+  function vehicleItemMatches(it, tokens) {
+    return (it.vehicles || []).some(function (v) {
+      var hay = vehicleHay(v.model);
+      return tokens.every(function (t) { return hay.indexOf(t) !== -1; });
+    });
+  }
+
   function applyItems(items, skipRenderIfSame) {
     var json = JSON.stringify(items.map(function (it) { return { ref: it.ref, category: it.category, qty: it.qty, vehicles: it.vehicles || [] }; }));
     if (skipRenderIfSame && json === lastRemoteJSON) return;
@@ -548,9 +569,17 @@
     catList.innerHTML = Object.keys(cats).sort().map(function (c) { return '<option value="' + escapeHtml(c) + '"></option>'; }).join("");
   }
 
+  function refreshVehModelList() {
+    var models = {};
+    store.items.forEach(function (it) { (it.vehicles || []).forEach(function (v) { if (v.model) models[v.model] = true; }); });
+    var list = document.getElementById("vehModelList");
+    list.innerHTML = Object.keys(models).sort().map(function (m) { return '<option value="' + escapeHtml(m) + '"></option>'; }).join("");
+  }
+
   // ---------- render router ----------
   function render() {
     updateStats();
+    refreshVehModelList();
     var q = searchEl.value.trim();
     clearBtn.style.display = q ? "flex" : "none";
 
@@ -623,15 +652,12 @@
     if (b) b.addEventListener("click", function () { view.mode = "home"; view.category = null; render(); window.scrollTo({ top: 0 }); });
   }
 
-  function vehicleMatch(it, nq) {
-    return (it.vehicles || []).some(function (v) { return normalize(v.model).indexOf(nq) !== -1; });
-  }
-
   function renderSearchResults(q) {
     var nq = normalize(q);
     var byVehicle = searchMode === "vehicle";
+    var vTokens = byVehicle ? vehicleTokens(q) : null;
     var matches = store.items.filter(function (it) {
-      return byVehicle ? vehicleMatch(it, nq) : normalize(it.ref).indexOf(nq) !== -1;
+      return byVehicle ? (vTokens.length && vehicleItemMatches(it, vTokens)) : normalize(it.ref).indexOf(nq) !== -1;
     });
     matches.sort(function (a, b) {
       if (byVehicle) return a.ref.localeCompare(b.ref);
@@ -656,10 +682,10 @@
       return;
     }
 
-    var html = heroCardHtml(matches[0], byVehicle ? nq : null);
+    var html = heroCardHtml(matches[0], byVehicle ? vTokens : null);
     if (matches.length > 1) {
       html += '<div class="group-title">Autres résultats</div><div class="row-list">';
-      matches.slice(1).forEach(function (it) { html += rowHtml(it, byVehicle ? nq : null); });
+      matches.slice(1).forEach(function (it) { html += rowHtml(it, byVehicle ? vTokens : null); });
       html += "</div>";
     }
     mainEl.innerHTML = html;
@@ -692,11 +718,11 @@
     );
   }
 
-  function vehicleChipsHtml(it, matchQ, prefix) {
+  function vehicleChipsHtml(it, matchTokens, prefix) {
     prefix = prefix || "hero";
     var vehicles = it.vehicles || [];
     var chips = vehicles.map(function (v) {
-      var isMatch = matchQ && normalize(v.model).indexOf(matchQ) !== -1;
+      var isMatch = matchTokens && matchTokens.length && matchTokens.every(function (t) { return vehicleHay(v.model).indexOf(t) !== -1; });
       return '<span class="veh-chip' + (isMatch ? " match" : "") + '">' + escapeHtml(vehicleLabel(v)) +
         '<button data-rm-veh="' + v.id + '" aria-label="Retirer ce véhicule">✕</button></span>';
     }).join("");
@@ -704,7 +730,7 @@
       '<div class="veh-wrap">' + chips + "</div>" +
       '<div class="add-veh-row"><button class="link-btn" id="' + prefix + '-addBtn">+ Véhicule</button></div>' +
       '<div class="add-veh-form" id="' + prefix + '-form">' +
-        '<input class="f-model" id="' + prefix + '-model" type="text" placeholder="Modèle (ex : Renault Trafic III)">' +
+        '<input class="f-model" id="' + prefix + '-model" type="text" list="vehModelList" autocomplete="off" placeholder="Modèle (ex : Renault Trafic III)">' +
         '<input class="f-year" id="' + prefix + '-from" type="text" inputmode="numeric" maxlength="4" placeholder="De">' +
         '<span class="f-sep">–</span>' +
         '<input class="f-year" id="' + prefix + '-to" type="text" inputmode="numeric" maxlength="4" placeholder="À">' +
@@ -930,6 +956,7 @@
     modeRefBtn.classList.toggle("active", m === "ref");
     modeVehBtn.classList.toggle("active", m === "vehicle");
     searchEl.placeholder = m === "vehicle" ? "Chercher un véhicule (ex : Trafic)…" : "Chercher une référence, toutes catégories…";
+    if (m === "vehicle") searchEl.setAttribute("list", "vehModelList"); else searchEl.removeAttribute("list");
     render();
   }
   modeRefBtn.addEventListener("click", function () { setSearchMode("ref"); });
