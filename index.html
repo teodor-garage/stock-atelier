@@ -306,6 +306,14 @@
     padding: 12px; font-size: 16px; color: var(--ink); outline: none; font-family: inherit;
   }
   .field input:focus { border-color: var(--accent); }
+  .choice-row { display: flex; gap: 10px; }
+  .choice-btn {
+    flex: 1; display: flex; flex-direction: column; align-items: center; gap: 8px;
+    border: 1px solid var(--line); background: var(--panel-2); border-radius: 14px;
+    padding: 20px 10px; cursor: pointer; font-size: 13px; font-weight: 700; color: var(--ink); line-height: 1.3;
+  }
+  .choice-btn:active { background: var(--panel-3); }
+  .choice-icon { font-size: 26px; }
   .sheet-actions { display: flex; gap: 10px; margin-top: 18px; }
   button.primary { flex: 1; border: 0; background: var(--accent); color: var(--accent-ink); font-size: 15px; font-weight: 800; padding: 14px; border-radius: 12px; cursor: pointer; }
   button.primary:active { transform: scale(0.98); }
@@ -376,6 +384,23 @@
 </div>
 
 <button class="fab" id="addFab" aria-label="Ajouter une référence">+</button>
+
+<div class="backdrop" id="addChoiceBackdrop">
+  <div class="sheet">
+    <h2>Ajouter une référence</h2>
+    <div class="choice-row">
+      <button class="choice-btn" id="choiceScan" type="button">
+        <span class="choice-icon">📷</span>
+        <span>Scanner un<br>code-barres</span>
+      </button>
+      <button class="choice-btn" id="choiceText" type="button">
+        <span class="choice-icon">⌨️</span>
+        <span>Saisir<br>manuellement</span>
+      </button>
+    </div>
+    <div class="sheet-actions"><button class="secondary" id="addChoiceCancel" style="flex:1">Annuler</button></div>
+  </div>
+</div>
 
 <div class="backdrop" id="detailBackdrop">
   <div class="sheet" id="detailSheetInner"></div>
@@ -990,7 +1015,12 @@
   }
   function closeSheet() { backdrop.classList.remove("open"); editingId = null; }
 
-  document.getElementById("addFab").addEventListener("click", function () { openSheet(null); });
+  var addChoiceBackdrop = document.getElementById("addChoiceBackdrop");
+  document.getElementById("addFab").addEventListener("click", function () { addChoiceBackdrop.classList.add("open"); });
+  document.getElementById("addChoiceCancel").addEventListener("click", function () { addChoiceBackdrop.classList.remove("open"); });
+  addChoiceBackdrop.addEventListener("click", function (e) { if (e.target === addChoiceBackdrop) addChoiceBackdrop.classList.remove("open"); });
+  document.getElementById("choiceText").addEventListener("click", function () { addChoiceBackdrop.classList.remove("open"); openSheet(null); });
+  document.getElementById("choiceScan").addEventListener("click", function () { addChoiceBackdrop.classList.remove("open"); openScanner(); });
   document.getElementById("sheetCancel").addEventListener("click", closeSheet);
   backdrop.addEventListener("click", function (e) { if (e.target === backdrop) closeSheet(); });
 
