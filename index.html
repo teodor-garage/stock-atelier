@@ -859,10 +859,35 @@
       return;
     }
 
-    var html = heroCardHtml(matches[0], byVehicle ? vTokens : null);
+    if (byVehicle) {
+      var byCat = {}; var cats = [];
+      matches.forEach(function (it) {
+        var c = it.category || "Sans catégorie";
+        if (!byCat[c]) { byCat[c] = []; cats.push(c); }
+        byCat[c].push(it);
+      });
+      cats.sort();
+      var vhtml = "";
+      cats.forEach(function (c) {
+        var items = byCat[c].slice().sort(function (a, b) {
+          var av = Number(a.qty) > 0 ? 0 : 1, bv = Number(b.qty) > 0 ? 0 : 1;
+          if (av !== bv) return av - bv;
+          return a.ref.localeCompare(b.ref);
+        });
+        vhtml += '<div class="group-title">' + escapeHtml(c) + " · " + items.length + "</div><div class=\"row-list\">";
+        items.forEach(function (it) { vhtml += rowHtml(it, vTokens); });
+        vhtml += "</div>";
+      });
+      mainEl.innerHTML = vhtml;
+      bindRowSteppers();
+      bindRowOpen();
+      return;
+    }
+
+    var html = heroCardHtml(matches[0], null);
     if (matches.length > 1) {
       html += '<div class="group-title">Autres résultats</div><div class="row-list">';
-      matches.slice(1).forEach(function (it) { html += rowHtml(it, byVehicle ? vTokens : null); });
+      matches.slice(1).forEach(function (it) { html += rowHtml(it, null); });
       html += "</div>";
     }
     mainEl.innerHTML = html;
