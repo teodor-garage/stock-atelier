@@ -93,7 +93,44 @@
     width: 24px; height: 24px; border-radius: 50%; margin-right: 8px; font-size: 13px; cursor: pointer; flex: none;
   }
 
+  /* ---- search mode toggle ---- */
+  .mode-toggle {
+    display: flex; gap: 4px; margin: 10px 16px 0 16px; background: var(--panel-2);
+    border-radius: 10px; padding: 3px;
+  }
+  .mode-toggle button {
+    flex: 1; border: 0; background: transparent; color: var(--ink-dim); font-size: 12.5px; font-weight: 700;
+    padding: 8px 6px; border-radius: 8px; cursor: pointer;
+  }
+  .mode-toggle button.active { background: var(--panel); color: var(--ink); box-shadow: 0 1px 2px rgba(22,26,29,0.08); }
+
   main { padding-top: 20px; }
+
+  /* ---- vehicle chips ---- */
+  .veh-wrap { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .veh-chip {
+    display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600;
+    background: var(--panel-3); color: var(--ink-soft); border-radius: 999px; padding: 4px 6px 4px 10px;
+  }
+  .veh-chip button { border: 0; background: none; color: var(--ink-dim); font-size: 12px; cursor: pointer; padding: 0 2px; line-height: 1; }
+  .veh-chip.match { background: var(--ok-bg); color: var(--ok); }
+  .row-veh { font-size: 10.5px; color: var(--ink-dim); margin-top: 2px; }
+  .add-veh-row { margin-top: 10px; }
+  .add-veh-form { display: none; flex-wrap: wrap; gap: 8px; margin-top: 10px; align-items: center; }
+  .add-veh-form.open { display: flex; }
+  .add-veh-form input {
+    border: 1px solid var(--line); background: var(--panel-2); border-radius: 10px;
+    padding: 10px 12px; font-size: 14px; color: var(--ink); outline: none; font-family: inherit;
+  }
+  .add-veh-form input:focus { border-color: var(--accent); }
+  .add-veh-form .f-model { flex: 1 1 140px; min-width: 120px; }
+  .add-veh-form .f-year { width: 64px; text-align: center; font-family: ui-monospace, monospace; }
+  .add-veh-form .f-sep { color: var(--ink-dim); font-size: 13px; }
+  .add-veh-form .f-submit {
+    border: 0; background: var(--accent); color: var(--accent-ink); font-weight: 700; font-size: 13px;
+    padding: 10px 16px; border-radius: 10px; cursor: pointer; flex: none;
+  }
+  .add-veh-hint { font-size: 10.5px; color: var(--ink-dim); width: 100%; margin-top: -2px; }
 
   /* ---- category grid ---- */
   .cat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
@@ -265,6 +302,10 @@
     <input id="search" type="text" placeholder="Chercher une référence, toutes catégories…" autocomplete="off" autocapitalize="characters" spellcheck="false" inputmode="search">
     <button class="clear-btn" id="clearBtn" aria-label="Effacer">✕</button>
   </div>
+  <div class="mode-toggle">
+    <button class="active" id="modeRefBtn" type="button">Par référence</button>
+    <button id="modeVehBtn" type="button">Par véhicule</button>
+  </div>
 </header>
 
 <div class="wrap">
@@ -335,6 +376,7 @@
   var store = { items: [] };
   var view = { mode: "home", category: null };
   var editingId = null;
+  var searchMode = "ref"; // "ref" | "vehicle"
   var lastRemoteJSON = null;
   var pushInFlight = false;
   var pushQueued = false;
@@ -383,12 +425,22 @@
   }
 
   function withIds(items) {
-    items.forEach(function (it) { if (!it.id) it.id = makeId(); });
+    items.forEach(function (it) {
+      if (!it.id) it.id = makeId();
+      if (!Array.isArray(it.vehicles)) it.vehicles = [];
+      it.vehicles.forEach(function (v) { if (!v.id) v.id = makeId(); });
+    });
     return items;
   }
 
+  function vehicleLabel(v) {
+    var years = "";
+    if (v.from || v.to) years = " (" + (v.from || "?") + "–" + (v.to || "présent") + ")";
+    return v.model + years;
+  }
+
   function applyItems(items, skipRenderIfSame) {
-    var json = JSON.stringify(items.map(function (it) { return { ref: it.ref, category: it.category, qty: it.qty }; }));
+    var json = JSON.stringify(items.map(function (it) { return { ref: it.ref, category: it.category, qty: it.qty, vehicles: it.vehicles || [] }; }));
     if (skipRenderIfSame && json === lastRemoteJSON) return;
     lastRemoteJSON = json;
     store.items = withIds(items);
@@ -417,7 +469,12 @@
     if (pushInFlight) { pushQueued = true; return; }
     pushInFlight = true;
     setSyncState("saving");
-    var payload = store.items.map(function (it) { return { ref: it.ref, category: it.category, qty: it.qty }; });
+    var payload = store.items.map(function (it) {
+      return {
+        ref: it.ref, category: it.category, qty: it.qty,
+        vehicles: (it.vehicles || []).map(function (v) { return { model: v.model, from: v.from || "", to: v.to || "" }; })
+      };
+    });
     fetch(JSONBIN_WRITE_URL, {
       method: "PUT",
       headers: { "Content-Type": "application/json", "X-Master-Key": JSONBIN_WRITE_KEY },
@@ -544,10 +601,18 @@
     if (b) b.addEventListener("click", function () { view.mode = "home"; view.category = null; render(); window.scrollTo({ top: 0 }); });
   }
 
+  function vehicleMatch(it, nq) {
+    return (it.vehicles || []).some(function (v) { return normalize(v.model).indexOf(nq) !== -1; });
+  }
+
   function renderSearchResults(q) {
     var nq = normalize(q);
-    var matches = store.items.filter(function (it) { return normalize(it.ref).indexOf(nq) !== -1; });
+    var byVehicle = searchMode === "vehicle";
+    var matches = store.items.filter(function (it) {
+      return byVehicle ? vehicleMatch(it, nq) : normalize(it.ref).indexOf(nq) !== -1;
+    });
     matches.sort(function (a, b) {
+      if (byVehicle) return a.ref.localeCompare(b.ref);
       var an = normalize(a.ref), bn = normalize(b.ref);
       var ae = an === nq ? 0 : an.indexOf(nq) === 0 ? 1 : 2;
       var be = bn === nq ? 0 : bn.indexOf(nq) === 0 ? 1 : 2;
@@ -556,6 +621,10 @@
     });
 
     if (matches.length === 0) {
+      if (byVehicle) {
+        mainEl.innerHTML = '<div class="empty"><div class="big">🚗</div><p><strong>Aucune pièce associée</strong></p><p>Aucune référence n\'est encore liée à «' + escapeHtml(q) + '». Ouvre une référence en mode « Par référence » et utilise « + Véhicule » pour l\'associer.</p></div>';
+        return;
+      }
       mainEl.innerHTML = '<div class="empty"><div class="big">🔍</div><p><strong>Référence inconnue</strong></p><p>Aucune pièce ne correspond à «' + escapeHtml(q) + '».</p></div>';
       var addBtn = document.createElement("button");
       addBtn.className = "primary"; addBtn.style.cssText = "display:block;margin:14px auto 0 auto;max-width:260px;";
@@ -565,10 +634,10 @@
       return;
     }
 
-    var html = heroCardHtml(matches[0]);
+    var html = heroCardHtml(matches[0], byVehicle ? nq : null);
     if (matches.length > 1) {
       html += '<div class="group-title">Autres résultats</div><div class="row-list">';
-      matches.slice(1).forEach(function (it) { html += rowHtml(it); });
+      matches.slice(1).forEach(function (it) { html += rowHtml(it, byVehicle ? nq : null); });
       html += "</div>";
     }
     mainEl.innerHTML = html;
@@ -577,13 +646,20 @@
     bindRowOpen();
   }
 
-  function rowHtml(it) {
+  function rowHtml(it, matchQ) {
     var ok = Number(it.qty) > 0;
+    var vehicles = it.vehicles || [];
+    var vehLine = "";
+    if (vehicles.length) {
+      var labels = vehicles.map(function (v) { return vehicleLabel(v); });
+      vehLine = '<div class="row-veh">🚗 ' + escapeHtml(labels.slice(0, 2).join(" · ") + (labels.length > 2 ? " +" + (labels.length - 2) : "")) + "</div>";
+    }
     return (
       '<div class="row-card" data-id="' + it.id + '">' +
         '<div class="row-main" data-open="' + it.id + '">' +
           '<div class="row-ref mono">' + escapeHtml(it.ref) + "</div>" +
           '<div class="row-cat">' + escapeHtml(it.category || "Sans catégorie") + "</div>" +
+          vehLine +
         "</div>" +
         '<div class="row-steppers">' +
           '<button class="step" data-delta="-1" data-id="' + it.id + '" aria-label="Retirer une pièce">–</button>' +
@@ -594,7 +670,28 @@
     );
   }
 
-  function heroCardHtml(it) {
+  function vehicleChipsHtml(it, matchQ) {
+    var vehicles = it.vehicles || [];
+    var chips = vehicles.map(function (v) {
+      var isMatch = matchQ && normalize(v.model).indexOf(matchQ) !== -1;
+      return '<span class="veh-chip' + (isMatch ? " match" : "") + '">' + escapeHtml(vehicleLabel(v)) +
+        '<button data-rm-veh="' + v.id + '" aria-label="Retirer ce véhicule">✕</button></span>';
+    }).join("");
+    return (
+      '<div class="veh-wrap" id="vehChips">' + chips + "</div>" +
+      '<div class="add-veh-row"><button class="link-btn" id="addVehBtn">+ Véhicule</button></div>' +
+      '<div class="add-veh-form" id="addVehForm">' +
+        '<input class="f-model" id="vModel" type="text" placeholder="Modèle (ex : Renault Trafic III)">' +
+        '<input class="f-year" id="vFrom" type="text" inputmode="numeric" maxlength="4" placeholder="De">' +
+        '<span class="f-sep">–</span>' +
+        '<input class="f-year" id="vTo" type="text" inputmode="numeric" maxlength="4" placeholder="À">' +
+        '<button class="f-submit" id="vSubmit" type="button">Ajouter</button>' +
+        '<span class="add-veh-hint">Années optionnelles — laisse « À » vide si toujours d\'actualité</span>' +
+      "</div>"
+    );
+  }
+
+  function heroCardHtml(it, matchQ) {
     var ok = Number(it.qty) > 0;
     return (
       '<div class="hero-card" data-id="' + it.id + '">' +
@@ -612,6 +709,7 @@
           "</div>" +
         "</div>" +
         '<div class="hero-actions"><button class="link-btn" id="heroEdit">Modifier</button><button class="link-btn danger" id="heroDelete">Supprimer</button></div>' +
+        '<div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--line)">' + vehicleChipsHtml(it, matchQ) + "</div>" +
       "</div>"
     );
   }
@@ -651,6 +749,34 @@
       if (!confirm("Supprimer la référence « " + it.ref + " » ?")) return;
       store.items = store.items.filter(function (x) { return x.id !== it.id; });
       persist(); searchEl.value = ""; toast("Référence supprimée"); render();
+    });
+
+    var addVehBtn = document.getElementById("addVehBtn");
+    var addVehForm = document.getElementById("addVehForm");
+    if (addVehBtn) {
+      addVehBtn.addEventListener("click", function () {
+        addVehForm.classList.toggle("open");
+        if (addVehForm.classList.contains("open")) document.getElementById("vModel").focus();
+      });
+    }
+    var vSubmit = document.getElementById("vSubmit");
+    if (vSubmit) {
+      vSubmit.addEventListener("click", function () {
+        var model = document.getElementById("vModel").value.trim();
+        if (!model) { document.getElementById("vModel").focus(); return; }
+        var from = document.getElementById("vFrom").value.trim();
+        var to = document.getElementById("vTo").value.trim();
+        it.vehicles = it.vehicles || [];
+        it.vehicles.push({ id: makeId(), model: model, from: from, to: to });
+        persist(); toast("Véhicule associé"); render();
+      });
+    }
+    mainEl.querySelectorAll("[data-rm-veh]").forEach(function (el) {
+      el.addEventListener("click", function () {
+        var vid = el.getAttribute("data-rm-veh");
+        it.vehicles = (it.vehicles || []).filter(function (v) { return v.id !== vid; });
+        persist(); toast("Véhicule retiré"); render();
+      });
     });
   }
 
@@ -694,6 +820,18 @@
   });
 
   // ---------- search wiring ----------
+  var modeRefBtn = document.getElementById("modeRefBtn");
+  var modeVehBtn = document.getElementById("modeVehBtn");
+  function setSearchMode(m) {
+    searchMode = m;
+    modeRefBtn.classList.toggle("active", m === "ref");
+    modeVehBtn.classList.toggle("active", m === "vehicle");
+    searchEl.placeholder = m === "vehicle" ? "Chercher un véhicule (ex : Trafic)…" : "Chercher une référence, toutes catégories…";
+    render();
+  }
+  modeRefBtn.addEventListener("click", function () { setSearchMode("ref"); });
+  modeVehBtn.addEventListener("click", function () { setSearchMode("vehicle"); });
+
   searchEl.addEventListener("input", render);
   searchEl.addEventListener("focus", function () { searchShell.classList.add("focus"); });
   searchEl.addEventListener("blur", function () { searchShell.classList.remove("focus"); });
