@@ -896,7 +896,8 @@
             '<button class="stepper" id="heroPlus" aria-label="Ajouter une pièce">+</button>' +
           "</div>" +
         "</div>" +
-        '<div class="hero-actions"><button class="link-btn" id="heroEdit">Modifier</button><button class="link-btn danger" id="heroDelete">Supprimer</button></div>' +
+        '<div class="hero-actions"><button class="link-btn" id="heroEdit">Modifier</button><button class="link-btn danger" id="heroDelete">Supprimer</button>' +
+          '<a class="link-btn" href="https://www.google.com/search?q=' + encodeURIComponent(it.ref + " véhicules compatibles pièce auto") + '" target="_blank" rel="noopener">🔎 Véhicules compatibles</a></div>' +
         '<div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--line)">' + vehicleChipsHtml(it, matchQ, "hero") + "</div>" +
       "</div>"
     );
@@ -942,7 +943,8 @@
           '<button class="stepper" id="dPlus" aria-label="Ajouter une pièce">+</button>' +
         "</div>" +
       "</div>" +
-      '<div class="hero-actions"><button class="link-btn" id="dEdit">Modifier</button><button class="link-btn danger" id="dDelete">Supprimer</button></div>' +
+      '<div class="hero-actions"><button class="link-btn" id="dEdit">Modifier</button><button class="link-btn danger" id="dDelete">Supprimer</button>' +
+        '<a class="link-btn" href="https://www.google.com/search?q=' + encodeURIComponent(it.ref + " véhicules compatibles pièce auto") + '" target="_blank" rel="noopener">🔎 Véhicules compatibles</a></div>' +
       '<div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--line)">' +
         '<span class="qty-label">Compatibilité véhicules</span>' +
         vehicleChipsHtml(it, null, "detail") +
