@@ -55,11 +55,15 @@
   .brand-mark .lg {
     font-size: 21px; font-weight: 800; letter-spacing: -0.01em;
   }
-  .brand-mark .sm {
-    font-size: 11px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-dim);
-  }
   .brand-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px var(--accent); flex: none; }
-  .clock { font-size: 11px; color: var(--ink-dim); }
+
+  .sync-pill { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--ink-dim); font-weight: 600; }
+  .sync-led { width: 7px; height: 7px; border-radius: 50%; background: var(--ink-dim); flex: none; transition: background 0.25s ease; }
+  .sync-led.synced { background: var(--ok); box-shadow: 0 0 5px var(--ok); }
+  .sync-led.saving { background: var(--accent); animation: blink 0.8s ease-in-out infinite; }
+  .sync-led.connecting { background: var(--ink-dim); animation: blink 1.1s ease-in-out infinite; }
+  .sync-led.offline { background: var(--bad); }
+  @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
 
   .stat-strip {
     display: flex; gap: 0; margin: 16px 16px 0 16px;
@@ -92,12 +96,6 @@
   main { padding-top: 20px; }
 
   /* ---- category grid ---- */
-  .section-label {
-    font-size: 11px; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase;
-    color: var(--ink-dim); margin: 0 2px 10px 2px; display: flex; align-items: center; gap: 8px;
-  }
-  .section-label::after { content: ""; flex: 1; height: 1px; background: var(--line); }
-
   .cat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .cat-card {
     position: relative;
@@ -151,10 +149,6 @@
   .row-main { flex: 1; min-width: 0; cursor: pointer; }
   .row-ref { font-weight: 700; font-size: 14.5px; word-break: break-word; }
   .row-cat { font-size: 11px; color: var(--ink-dim); margin-top: 2px; }
-  .row-status { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
-  .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
-  .dot.ok { background: var(--ok); box-shadow: 0 0 6px var(--ok); }
-  .dot.bad { background: var(--bad); }
   .row-steppers { display: flex; align-items: center; gap: 6px; flex: none; }
   .step {
     width: 34px; height: 34px; border-radius: 9px; border: 1px solid var(--line);
@@ -249,9 +243,8 @@
   .toast.show { opacity: 1; transform: translate(-50%, 0); }
 
   footer { text-align: center; padding: 22px 0 4px 0; color: var(--ink-dim); font-size: 11px; }
-  footer button { background: none; border: 0; color: var(--ink-dim); font-size: 11px; text-decoration: underline; cursor: pointer; padding: 0; }
 
-  @media (prefers-reduced-motion: reduce) { .hero-card, .step, .stepper, .fab, button { animation: none !important; transition: none !important; } }
+  @media (prefers-reduced-motion: reduce) { .hero-card, .step, .stepper, .fab, button, .sync-led { animation: none !important; transition: none !important; } }
 </style>
 
 <header>
@@ -260,7 +253,7 @@
       <span class="brand-dot"></span>
       <span class="lg">Stock<span style="color:var(--ink-dim)">.</span>Atelier</span>
     </div>
-    <span class="clock mono" id="clock"></span>
+    <span class="sync-pill"><span class="sync-led" id="syncLed"></span><span id="syncLabel">Connexion…</span></span>
   </div>
   <div class="stat-strip">
     <div class="cell"><div class="n mono" id="statCats">0</div><div class="l">Catégories</div></div>
@@ -276,7 +269,7 @@
 
 <div class="wrap">
   <main id="main"></main>
-  <footer><span id="footNote"></span> · <button id="exportBtn">exporter une sauvegarde</button></footer>
+  <footer><span id="footNote"></span></footer>
 </div>
 
 <button class="fab" id="addFab" aria-label="Ajouter une référence">+</button>
@@ -297,208 +290,26 @@
 (function () {
   "use strict";
 
-  var BASE_VERSION = 3;
-  var STORAGE_KEY = "garage_stock_v1";
+  // ---------- shared cloud storage (JSONBin) ----------
+  var JSONBIN_ID = "6a60af7cda38895dfe7f20ad";
+  var JSONBIN_WRITE_KEY = "$2a$10$Bk0eMIifC3UcyBGJokSI0uUpZKA3.L0PgxnS7a2BbQ96FiJdVEhfO";
+  var JSONBIN_READ_URL = "https://api.jsonbin.io/v3/b/" + JSONBIN_ID + "/latest";
+  var JSONBIN_WRITE_URL = "https://api.jsonbin.io/v3/b/" + JSONBIN_ID;
+  var CACHE_KEY = "garage_stock_cache_v2";
+  var POLL_MS = 8000;
 
+  // Seed used only if this device has never synced before AND is offline on first load.
   var BASE_DATA = [
     { ref: "FC128x2", category: "Filtre habitacle", qty: 1 },
     { ref: "31375", category: "Filtre habitacle", qty: 1 },
-    { ref: "K1079A", category: "Filtre habitacle", qty: 1 },
-    { ref: "M5019", category: "Filtre habitacle", qty: 1 },
-    { ref: "FC203", category: "Filtre habitacle", qty: 1 },
-    { ref: "E4936LB", category: "Filtre habitacle", qty: 1 },
-    { ref: "FC292", category: "Filtre habitacle", qty: 1 },
-    { ref: "29220", category: "Filtre habitacle", qty: 1 },
-    { ref: "FC115x2", category: "Filtre habitacle", qty: 1 },
-    { ref: "K1311", category: "Filtre habitacle", qty: 1 },
-    { ref: "K1338A", category: "Filtre habitacle", qty: 1 },
-    { ref: "FH126", category: "Filtre habitacle", qty: 1 },
-    { ref: "M5113", category: "Filtre habitacle", qty: 1 },
-    { ref: "AHH513", category: "Filtre habitacle", qty: 4 },
-    { ref: "PCK8253", category: "Filtre habitacle", qty: 1 },
-    { ref: "FC205", category: "Filtre habitacle", qty: 1 },
-    { ref: "R5596", category: "Filtre habitacle", qty: 1 },
-    { ref: "FC511", category: "Filtre habitacle", qty: 2 },
-    { ref: "FC440", category: "Filtre habitacle", qty: 1 },
-    { ref: "100381", category: "Filtre habitacle", qty: 1 },
-    { ref: "FC047Z", category: "Filtre habitacle", qty: 1 },
-    { ref: "LAK1198", category: "Filtre habitacle", qty: 1 },
-    { ref: "M110887K", category: "Filtre habitacle", qty: 1 },
-    { ref: "LAK888", category: "Filtre habitacle", qty: 2 },
-    { ref: "FC297x2", category: "Filtre habitacle", qty: 1 },
-    { ref: "K1128A", category: "Filtre habitacle", qty: 1 },
-    { ref: "K1187A", category: "Filtre habitacle", qty: 2 },
-    { ref: "E5967LC", category: "Filtre habitacle", qty: 1 },
-    { ref: "LA346/S", category: "Filtre habitacle", qty: 1 },
-    { ref: "FC277x2", category: "Filtre habitacle", qty: 1 },
-    { ref: "LAK373", category: "Filtre habitacle", qty: 1 },
-    { ref: "B42013CPR", category: "Filtre habitacle", qty: 1 },
-    { ref: "PUR-PC2015C-2", category: "Filtre habitacle", qty: 1 },
-    { ref: "PUR-PC2008C-2", category: "Filtre habitacle", qty: 1 },
-    { ref: "LAK138", category: "Filtre habitacle", qty: 1 },
-    { ref: "PC8382", category: "Filtre habitacle", qty: 2 },
-    { ref: "K1287", category: "Filtre habitacle", qty: 1 },
-    { ref: "K1204A", category: "Filtre habitacle", qty: 1 },
-    { ref: "K1147A", category: "Filtre habitacle", qty: 2 },
-    { ref: "WP2111", category: "Filtre habitacle", qty: 1 },
-    { ref: "R5502", category: "Filtre habitacle", qty: 1 },
-    { ref: "K1207", category: "Filtre habitacle", qty: 2 },
-    { ref: "K1232", category: "Filtre habitacle", qty: 1 },
-    { ref: "M2190", category: "Filtre habitacle", qty: 1 },
-    { ref: "M2065", category: "Filtre habitacle", qty: 1 },
-    { ref: "K1150A", category: "Filtre habitacle", qty: 1 },
-    { ref: "AP 179/2", category: "Filtre à air", qty: 1 },
-    { ref: "AK 362/1", category: "Filtre à air", qty: 1 },
-    { ref: "C 30 125/4", category: "Filtre à air", qty: 1 },
-    { ref: "E1289L", category: "Filtre à air", qty: 1 },
-    { ref: "PA759", category: "Filtre à air", qty: 1 },
-    { ref: "LX 4077", category: "Filtre à air", qty: 4 },
-    { ref: "S 9404", category: "Filtre à air", qty: 1 },
-    { ref: "S 0002", category: "Filtre à air", qty: 1 },
-    { ref: "S 3596", category: "Filtre à air", qty: 1 },
-    { ref: "FB887/20", category: "Filtre à air", qty: 1 },
-    { ref: "AP 165/3", category: "Filtre à air", qty: 1 },
-    { ref: "AP 135/2", category: "Filtre à air", qty: 1 },
-    { ref: "E1359L", category: "Filtre à air", qty: 2 },
-    { ref: "AP 090/1", category: "Filtre à air", qty: 3 },
-    { ref: "AP 196/8", category: "Filtre à air", qty: 1 },
-    { ref: "S 3075", category: "Filtre à air", qty: 1 },
-    { ref: "PA7641", category: "Filtre à air", qty: 1 },
-    { ref: "AP 196/3", category: "Filtre à air", qty: 1 },
-    { ref: "C 36 006/1", category: "Filtre à air", qty: 1 },
-    { ref: "AP 021", category: "Filtre à air", qty: 1 },
-    { ref: "WA9666", category: "Filtre à air", qty: 1 },
-    { ref: "PA2102", category: "Filtre à air", qty: 1 },
-    { ref: "LX 804/S", category: "Filtre à air", qty: 1 },
-    { ref: "100468", category: "Filtre à air", qty: 1 },
-    { ref: "AP 196/2", category: "Filtre à air", qty: 1 },
-    { ref: "S 3531", category: "Filtre à air", qty: 1 },
-    { ref: "BSG 75-135-024", category: "Filtre à air", qty: 1 },
-    { ref: "PA3158", category: "Filtre à air", qty: 1 },
-
-    { ref: "A 654 180 11 00", category: "Filtre à huile", qty: 1 },
-    { ref: "170088", category: "Filtre à huile", qty: 3 },
-    { ref: "38462", category: "Filtre à huile", qty: 1 },
-    { ref: "OX 379 D", category: "Filtre à huile", qty: 3 },
-    { ref: "OX 377 D", category: "Filtre à huile", qty: 1 },
-    { ref: "OX 388 D", category: "Filtre à huile", qty: 6 },
-    { ref: "FOP247", category: "Filtre à huile", qty: 3 },
-    { ref: "FO305", category: "Filtre à huile", qty: 2 },
-    { ref: "ELH 4429", category: "Filtre à huile", qty: 1 },
-    { ref: "P 9256", category: "Filtre à huile", qty: 2 },
-    { ref: "OX 153 D1", category: "Filtre à huile", qty: 1 },
-    { ref: "FH014Z", category: "Filtre à huile", qty: 1 },
-    { ref: "W 610/6", category: "Filtre à huile", qty: 1 },
-    { ref: "108285", category: "Filtre à huile", qty: 1 },
-    { ref: "OP 641", category: "Filtre à huile", qty: 1 },
-    { ref: "HU 6008/1z", category: "Filtre à huile", qty: 1 },
-    { ref: "FO581", category: "Filtre à huile", qty: 1 },
-    { ref: "FOP350", category: "Filtre à huile", qty: 1 },
-    { ref: "L107", category: "Filtre à huile", qty: 1 },
-    { ref: "OX 401 D", category: "Filtre à huile", qty: 1 },
-    { ref: "P 7022", category: "Filtre à huile", qty: 1 },
-    { ref: "H12W08", category: "Filtre à huile", qty: 1 },
-    { ref: "S 5031 PE", category: "Filtre à huile", qty: 1 },
-
-    { ref: "PE 973/2", category: "Filtre à carburant", qty: 1 },
-    { ref: "PP 836/1", category: "Filtre à carburant", qty: 1 },
-    { ref: "PP 855/1", category: "Filtre à carburant", qty: 1 },
-    { ref: "FN192", category: "Filtre à carburant", qty: 2 },
-    { ref: "FN938", category: "Filtre à carburant", qty: 1 },
-    { ref: "PE 816/4", category: "Filtre à carburant", qty: 1 },
-    { ref: "PE 973", category: "Filtre à carburant", qty: 2 },
-    { ref: "C507A", category: "Filtre à carburant", qty: 1 },
-    { ref: "FN160", category: "Filtre à carburant", qty: 1 },
-    { ref: "KX 568 KIT", category: "Filtre à carburant", qty: 1 },
-    { ref: "C875", category: "Filtre à carburant", qty: 1 },
-    { ref: "KX 338/26 D", category: "Filtre à carburant", qty: 1 },
-    { ref: "KL 416/1", category: "Filtre à carburant", qty: 1 },
-    { ref: "KL 763 D", category: "Filtre à carburant", qty: 1 },
-    { ref: "P718x", category: "Filtre à carburant", qty: 1 },
-    { ref: "PM 815/4", category: "Filtre à carburant", qty: 1 },
-    { ref: "ELG 5238", category: "Filtre à carburant", qty: 1 },
-    { ref: "N 1724", category: "Filtre à carburant", qty: 1 },
-    { ref: "KX 399 D", category: "Filtre à carburant", qty: 1 },
-    { ref: "PE 973/7", category: "Filtre à carburant", qty: 1 },
-    { ref: "FCS711", category: "Filtre à carburant", qty: 1 },
-    { ref: "62178", category: "Filtre à carburant", qty: 1 },
-    { ref: "S 4123 NR", category: "Filtre à carburant", qty: 1 },
-    { ref: "PU 11 001 z KIT", category: "Filtre à carburant", qty: 1 },
-    { ref: "HDF513", category: "Filtre à carburant", qty: 1 },
-    { ref: "FA6778", category: "Filtre à carburant", qty: 1 },
-    { ref: "KX 218 D", category: "Filtre à carburant", qty: 1 },
-    { ref: "KX 218 D Eco", category: "Filtre à carburant", qty: 1 },
-    { ref: "ELG 5488", category: "Filtre à carburant", qty: 1 },
-    { ref: "N 6500", category: "Filtre à carburant", qty: 1 },
-    { ref: "PP 839/1", category: "Filtre à carburant", qty: 1 },
-    { ref: "B3W038PR", category: "Filtre à carburant", qty: 1 },
-
-    { ref: "C2M029ABE", category: "Plaquette de frein", qty: 1 },
-    { ref: "301777", category: "Plaquette de frein", qty: 1 },
-    { ref: "2500801", category: "Plaquette de frein", qty: 6 },
-    { ref: "90R-01111/113", category: "Plaquette de frein", qty: 1 },
-    { ref: "GDB2055", category: "Plaquette de frein", qty: 1 },
-    { ref: "13336", category: "Plaquette de frein", qty: 1 },
-    { ref: "D2118M", category: "Plaquette de frein", qty: 1 },
-    { ref: "510197", category: "Plaquette de frein", qty: 1 },
-    { ref: "LP3620", category: "Plaquette de frein", qty: 4 },
-    { ref: "FDB4608", category: "Plaquette de frein", qty: 2 },
-    { ref: "FVR1038", category: "Plaquette de frein", qty: 1 },
-    { ref: "0 986 494 331", category: "Plaquette de frein", qty: 1 },
-    { ref: "21231.00", category: "Plaquette de frein", qty: 1 },
-    { ref: "21578.02", category: "Plaquette de frein", qty: 1 },
-    { ref: "GDB400", category: "Plaquette de frein", qty: 1 },
-    { ref: "P 68 048", category: "Plaquette de frein", qty: 1 },
-    { ref: "P 50 129", category: "Plaquette de frein", qty: 1 },
-    { ref: "MDB1987", category: "Plaquette de frein", qty: 1 },
-    { ref: "GDB1941", category: "Plaquette de frein", qty: 1 },
-    { ref: "WTS9807", category: "Plaquette de frein", qty: 1 },
-    { ref: "8Y0 698 451 B", category: "Plaquette de frein", qty: 1 },
-    { ref: "24140z", category: "Plaquette de frein", qty: 1 },
-    { ref: "604725", category: "Plaquette de frein", qty: 1 },
-    { ref: "GDB2036", category: "Plaquette de frein", qty: 1 },
-    { ref: "2427501", category: "Plaquette de frein", qty: 1 },
-    { ref: "2517903", category: "Plaquette de frein", qty: 1 },
-    { ref: "0 986 424 785", category: "Plaquette de frein", qty: 1 },
-    { ref: "102 54 5059", category: "Plaquette de frein", qty: 1 },
-    { ref: "21625.08", category: "Plaquette de frein", qty: 1 },
-    { ref: "2260101", category: "Plaquette de frein", qty: 1 },
-    { ref: "21036.02", category: "Plaquette de frein", qty: 1 },
-    { ref: "FSB696", category: "Plaquette de frein", qty: 1 },
-    { ref: "0268502", category: "Plaquette de frein", qty: 1 },
-
-    { ref: "49152", category: "Bobine d'allumage", qty: 3 },
-    { ref: "5DA 193 175-491", category: "Bobine d'allumage", qty: 3 },
-    { ref: "245105", category: "Bobine d'allumage", qty: 1 },
-    { ref: "48026", category: "Bobine d'allumage", qty: 1 },
-
-    { ref: "97-02378-1", category: "Barre stabilisatrice", qty: 1 },
-    { ref: "CI-LS-7321", category: "Barre stabilisatrice", qty: 1 },
-    { ref: "PE-LS-1573", category: "Barre stabilisatrice", qty: 2 },
-    { ref: "97-02378-2", category: "Barre stabilisatrice", qty: 1 },
-
-    { ref: "CSCY-002", category: "Butée d'embrayage", qty: 1 },
-
-    { ref: "TA1785", category: "Rotule de direction", qty: 1 },
-    { ref: "016 031 0012", category: "Rotule de direction", qty: 1 },
-    { ref: "92-09592", category: "Rotule de direction", qty: 1 },
-    { ref: "JAR1306", category: "Rotule de direction", qty: 1 },
-
-    { ref: "532 0895 10", category: "Tendeur de courroie", qty: 1 },
-    { ref: "534 0337 10", category: "Tendeur de courroie", qty: 1 },
-    { ref: "LA0267", category: "Tendeur de courroie", qty: 1 },
-
-    { ref: "713 6442 90", category: "Roulement", qty: 2 },
-
-    { ref: "535 0168 10", category: "Galet tendeur", qty: 1 },
-    { ref: "532 0569 10", category: "Galet tendeur", qty: 1 },
-
-    { ref: "38402", category: "Support moteur", qty: 1 },
-    { ref: "AP8237", category: "Pompe à eau", qty: 1 },
-    { ref: "0 986 022 80 0-9EG", category: "Démarreur", qty: 1 },
-    { ref: "535 0105 10", category: "Roue libre d'alternateur", qty: 1 },
-    { ref: "896-105KC", category: "Thermostat", qty: 1 }
+    { ref: "K1079A", category: "Filtre habitacle", qty: 1 }
   ];
+
+  function makeId() { return Math.random().toString(36).slice(2) + Date.now().toString(36); }
+  function normalize(s) { return (s || "").toString().toLowerCase().replace(/[\s\-\/_.]/g, ""); }
+  function escapeHtml(s) {
+    return (s || "").toString().replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; });
+  }
 
   // ---------- icons ----------
   var ICONS = {
@@ -521,34 +332,12 @@
     return ICONS.defaut;
   }
 
-  // ---------- storage ----------
-  function loadStore() {
-    var raw;
-    try { raw = localStorage.getItem(STORAGE_KEY); } catch (e) { raw = null; }
-    var store;
-    if (raw) { try { store = JSON.parse(raw); } catch (e) { store = null; } }
-    if (!store || !Array.isArray(store.items)) store = { baseVersion: 0, items: [] };
-    if (store.baseVersion < BASE_VERSION) {
-      var existingRefs = {};
-      store.items.forEach(function (it) { existingRefs[normalize(it.ref)] = true; });
-      BASE_DATA.forEach(function (it) {
-        if (!existingRefs[normalize(it.ref)]) store.items.push({ ref: it.ref, category: it.category, qty: it.qty, id: makeId() });
-      });
-      store.baseVersion = BASE_VERSION;
-      saveStore(store);
-    }
-    store.items.forEach(function (it) { if (!it.id) it.id = makeId(); });
-    return store;
-  }
-  function saveStore(store) { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(store)); } catch (e) {} }
-  function makeId() { return Math.random().toString(36).slice(2) + Date.now().toString(36); }
-  function normalize(s) { return (s || "").toString().toLowerCase().replace(/[\s\-\/_.]/g, ""); }
-  function escapeHtml(s) {
-    return (s || "").toString().replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; });
-  }
-
-  var store = loadStore();
-  var view = { mode: "home", category: null }; // mode: home | category
+  var store = { items: [] };
+  var view = { mode: "home", category: null };
+  var editingId = null;
+  var lastRemoteJSON = null;
+  var pushInFlight = false;
+  var pushQueued = false;
 
   // ---------- dom ----------
   var searchEl = document.getElementById("search");
@@ -565,20 +354,98 @@
   var fCat = document.getElementById("fCat");
   var fQty = document.getElementById("fQty");
   var catList = document.getElementById("catList");
-  var editingId = null;
+  var syncLed = document.getElementById("syncLed");
+  var syncLabel = document.getElementById("syncLabel");
+  var footNote = document.getElementById("footNote");
 
   function toast(msg) {
     toastEl.textContent = msg; toastEl.classList.add("show");
-    clearTimeout(toast._t); toast._t = setTimeout(function () { toastEl.classList.remove("show"); }, 1600);
+    clearTimeout(toast._t); toast._t = setTimeout(function () { toastEl.classList.remove("show"); }, 1800);
   }
 
-  function tickClock() {
-    var d = new Date();
-    var p = function (n) { return (n < 10 ? "0" : "") + n; };
-    document.getElementById("clock").textContent = p(d.getHours()) + ":" + p(d.getMinutes());
+  function setSyncState(s) {
+    syncLed.className = "sync-led " + s;
+    var labels = { connecting: "Connexion…", synced: "Synchronisé", saving: "Enregistrement…", offline: "Hors ligne" };
+    syncLabel.textContent = labels[s] || "";
+    footNote.textContent = s === "offline"
+      ? "Hors ligne — les modifications seront envoyées dès la reconnexion"
+      : "Synchronisé en temps réel avec tous les appareils";
   }
-  tickClock(); setInterval(tickClock, 15000);
+  setSyncState("connecting");
 
+  // ---------- cloud sync ----------
+  function loadCache() {
+    try { var raw = localStorage.getItem(CACHE_KEY); if (raw) return JSON.parse(raw); } catch (e) {}
+    return null;
+  }
+  function saveCache(items) {
+    try { localStorage.setItem(CACHE_KEY, JSON.stringify(items)); } catch (e) {}
+  }
+
+  function withIds(items) {
+    items.forEach(function (it) { if (!it.id) it.id = makeId(); });
+    return items;
+  }
+
+  function applyItems(items, skipRenderIfSame) {
+    var json = JSON.stringify(items.map(function (it) { return { ref: it.ref, category: it.category, qty: it.qty }; }));
+    if (skipRenderIfSame && json === lastRemoteJSON) return;
+    lastRemoteJSON = json;
+    store.items = withIds(items);
+    saveCache(store.items);
+    render();
+  }
+
+  function fetchRemote() {
+    return fetch(JSONBIN_READ_URL, { cache: "no-store" })
+      .then(function (r) { if (!r.ok) throw new Error("http " + r.status); return r.json(); })
+      .then(function (data) {
+        var items = (data && data.record) || [];
+        applyItems(items, true);
+        setSyncState("synced");
+      })
+      .catch(function () {
+        setSyncState("offline");
+        if (store.items.length === 0) {
+          var cached = loadCache();
+          applyItems(cached && cached.length ? cached : BASE_DATA.map(function (it) { return { ref: it.ref, category: it.category, qty: it.qty }; }), false);
+        }
+      });
+  }
+
+  function pushRemote() {
+    if (pushInFlight) { pushQueued = true; return; }
+    pushInFlight = true;
+    setSyncState("saving");
+    var payload = store.items.map(function (it) { return { ref: it.ref, category: it.category, qty: it.qty }; });
+    fetch(JSONBIN_WRITE_URL, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", "X-Master-Key": JSONBIN_WRITE_KEY },
+      body: JSON.stringify(payload)
+    })
+      .then(function (r) { if (!r.ok) throw new Error("http " + r.status); return r.json(); })
+      .then(function () {
+        lastRemoteJSON = JSON.stringify(payload);
+        saveCache(store.items);
+        setSyncState("synced");
+      })
+      .catch(function () {
+        setSyncState("offline");
+        toast("Hors ligne : sera envoyé à la reconnexion");
+        saveCache(store.items);
+      })
+      .then(function () {
+        pushInFlight = false;
+        if (pushQueued) { pushQueued = false; pushRemote(); }
+      });
+  }
+
+  function persist() {
+    saveCache(store.items);
+    pushRemote();
+  }
+
+  // ---------- stats / categories ----------
   function categoriesData() {
     var map = {};
     store.items.forEach(function (it) {
@@ -734,7 +601,7 @@
         '<div class="hero-top">' +
           '<div><div class="hero-ref mono">' + escapeHtml(it.ref) + "</div>" +
           '<span class="tag">' + escapeHtml(it.category || "Sans catégorie") + "</span></div>" +
-          '<span class="pill ' + (ok ? "ok" : "bad") + '"><span class="dot ' + (ok ? "ok" : "bad") + '"></span>' + (ok ? "Disponible" : "Indisponible") + "</span>" +
+          '<span class="pill ' + (ok ? "ok" : "bad") + '"><span class="dot"></span>' + (ok ? "Disponible" : "Indisponible") + "</span>" +
         "</div>" +
         '<div class="qty-row">' +
           '<span class="qty-label">Quantité en stock</span>' +
@@ -766,7 +633,7 @@
         var it = store.items.find(function (x) { return x.id === id; });
         if (!it) return;
         it.qty = Math.max(0, (Number(it.qty) || 0) + delta);
-        saveStore(store);
+        persist();
         var span = mainEl.querySelector('[data-qty="' + id + '"]');
         if (span) { span.textContent = it.qty; span.style.color = it.qty > 0 ? "var(--ok)" : "var(--bad)"; }
         updateStats();
@@ -777,13 +644,13 @@
   function bindHeroActions(id) {
     var it = store.items.find(function (x) { return x.id === id; });
     if (!it) return;
-    document.getElementById("heroMinus").addEventListener("click", function () { it.qty = Math.max(0, (Number(it.qty) || 0) - 1); saveStore(store); render(); });
-    document.getElementById("heroPlus").addEventListener("click", function () { it.qty = (Number(it.qty) || 0) + 1; saveStore(store); render(); });
+    document.getElementById("heroMinus").addEventListener("click", function () { it.qty = Math.max(0, (Number(it.qty) || 0) - 1); persist(); render(); });
+    document.getElementById("heroPlus").addEventListener("click", function () { it.qty = (Number(it.qty) || 0) + 1; persist(); render(); });
     document.getElementById("heroEdit").addEventListener("click", function () { openSheet(it.id); });
     document.getElementById("heroDelete").addEventListener("click", function () {
       if (!confirm("Supprimer la référence « " + it.ref + " » ?")) return;
       store.items = store.items.filter(function (x) { return x.id !== it.id; });
-      saveStore(store); searchEl.value = ""; toast("Référence supprimée"); render();
+      persist(); searchEl.value = ""; toast("Référence supprimée"); render();
     });
   }
 
@@ -821,7 +688,7 @@
       store.items.push({ id: makeId(), ref: ref, category: cat, qty: qty });
       toast("Référence ajoutée");
     }
-    saveStore(store); closeSheet();
+    persist(); closeSheet();
     if (searchEl.value) searchEl.value = ref; else { view.mode = "category"; view.category = cat || "Sans catégorie"; }
     render();
   });
@@ -833,20 +700,13 @@
   clearBtn.addEventListener("click", function () { searchEl.value = ""; render(); searchEl.focus(); });
   searchEl.addEventListener("keydown", function (e) { if (e.key === "Escape") { searchEl.value = ""; render(); searchEl.blur(); } });
 
-  // ---------- export backup ----------
-  document.getElementById("exportBtn").addEventListener("click", function () {
-    var data = JSON.stringify({ exportedAt: new Date().toISOString(), items: store.items }, null, 2);
-    if (window.claude && window.claude.downloads) {
-      window.claude.downloads.save({ filename: "stock-pieces-sauvegarde.json", data: data }).then(function () { toast("Sauvegarde enregistrée"); }).catch(function () { toast("Export annulé"); });
-    } else {
-      var blob = new Blob([data], { type: "application/json" });
-      var url = URL.createObjectURL(blob);
-      var a = document.createElement("a"); a.href = url; a.download = "stock-pieces-sauvegarde.json";
-      document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
-    }
-  });
-
-  document.getElementById("footNote").textContent = store.items.length + " réf. enregistrées sur cet appareil";
+  // ---------- boot + live sync ----------
+  var cachedOnBoot = loadCache();
+  if (cachedOnBoot && cachedOnBoot.length) { applyItems(cachedOnBoot, false); }
+  fetchRemote();
+  setInterval(fetchRemote, POLL_MS);
+  document.addEventListener("visibilitychange", function () { if (document.visibilityState === "visible") fetchRemote(); });
+  window.addEventListener("focus", fetchRemote);
 
   render();
 })();
