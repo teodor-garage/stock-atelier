@@ -171,6 +171,13 @@
     padding: 10px 16px; border-radius: 10px; cursor: pointer; flex: none;
   }
   .add-veh-hint { font-size: 10.5px; color: var(--ink-dim); width: 100%; margin-top: -2px; }
+  .bulk-veh-form { display: none; margin-top: 10px; }
+  .bulk-veh-form.open { display: block; }
+  .bulk-veh-form textarea {
+    width: 100%; border: 1px solid var(--line); background: var(--panel-2); border-radius: 10px;
+    padding: 10px 12px; font-size: 14px; color: var(--ink); outline: none; font-family: inherit; resize: vertical;
+  }
+  .bulk-veh-form textarea:focus { border-color: var(--accent); }
 
   /* ---- category grid ---- */
   .cat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
@@ -590,6 +597,37 @@
   function vehicleHay(model) {
     return normalizeVehicleText(model).replace(/[^a-z0-9]/g, "");
   }
+  function parseVehicleBulk(text) {
+    var norm = (text || "")
+      .replace(/\b(et|and|&)\b/gi, " ")
+      .replace(/[,;/\n\r]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!norm) return [];
+    var tokens = norm.split(" ");
+    var vehicles = [];
+    var buf = [];
+    tokens.forEach(function (tok) {
+      var m = tok.match(/^(.*?)((?:19|20)\d{2})$/);
+      if (m) {
+        if (m[1]) buf.push(m[1]);
+        var model = buf.join(" ").trim();
+        if (model) vehicles.push({ model: model, from: m[2], to: "" });
+        buf = [];
+      } else {
+        buf.push(tok);
+      }
+    });
+    if (buf.length) {
+      var lastModel = buf.join(" ").trim();
+      if (lastModel) vehicles.push({ model: lastModel, from: "", to: "" });
+    }
+    vehicles.forEach(function (v) {
+      v.model = v.model.replace(/\b\w/g, function (c) { return c.toUpperCase(); });
+    });
+    return vehicles;
+  }
+
   function vehicleItemMatches(it, tokens) {
     return (it.vehicles || []).some(function (v) {
       var hay = vehicleHay(v.model);
@@ -867,7 +905,10 @@
     }).join("");
     return (
       '<div class="veh-wrap">' + chips + "</div>" +
-      '<div class="add-veh-row"><button class="link-btn" id="' + prefix + '-addBtn">+ Véhicule</button></div>' +
+      '<div class="add-veh-row">' +
+        '<button class="link-btn" id="' + prefix + '-addBtn">+ Véhicule</button>' +
+        '<button class="link-btn" id="' + prefix + '-bulkBtn" style="margin-left:14px">📋 Coller plusieurs</button>' +
+      "</div>" +
       '<div class="add-veh-form" id="' + prefix + '-form">' +
         '<input class="f-model" id="' + prefix + '-model" type="text" list="vehModelList" autocomplete="off" placeholder="Modèle (ex : Renault Trafic III)">' +
         '<input class="f-year" id="' + prefix + '-from" type="text" inputmode="numeric" maxlength="4" placeholder="De">' +
@@ -875,6 +916,11 @@
         '<input class="f-year" id="' + prefix + '-to" type="text" inputmode="numeric" maxlength="4" placeholder="À">' +
         '<button class="f-submit" id="' + prefix + '-submit" type="button">Ajouter</button>' +
         '<span class="add-veh-hint">Années optionnelles — laisse « À » vide si toujours d\'actualité</span>' +
+      "</div>" +
+      '<div class="bulk-veh-form" id="' + prefix + '-bulkForm">' +
+        '<textarea id="' + prefix + '-bulkText" rows="3" placeholder="Colle ou tape plusieurs véhicules, ex : tiguan 2009 SKODA 2007 et megane 3"></textarea>' +
+        '<div class="add-veh-hint">Un an (ex : 2009) marque la fin d\'un véhicule — sépare par une virgule, un retour à la ligne ou « et » si pas d\'année.</div>' +
+        '<button class="f-submit" id="' + prefix + '-bulkSubmit" type="button" style="margin-top:8px">Créer les compatibilités</button>' +
       "</div>"
     );
   }
@@ -965,31 +1011,60 @@
       store.items = store.items.filter(function (x) { return x.id !== it.id; });
       persist(); closeDetail(); toast("Référence supprimée"); render();
     });
-    var addVehBtn = document.getElementById("detail-addBtn");
-    var addVehForm = document.getElementById("detail-form");
+    bindVehicleForms(it, "detail", detailSheetInner, function () { renderDetail(); render(); });
+  }
+
+  function bindVehicleForms(it, prefix, container, afterChange) {
+    var addVehBtn = document.getElementById(prefix + "-addBtn");
+    var addVehForm = document.getElementById(prefix + "-form");
+    var bulkBtn = document.getElementById(prefix + "-bulkBtn");
+    var bulkForm = document.getElementById(prefix + "-bulkForm");
     if (addVehBtn) {
       addVehBtn.addEventListener("click", function () {
+        bulkForm.classList.remove("open");
         addVehForm.classList.toggle("open");
-        if (addVehForm.classList.contains("open")) document.getElementById("detail-model").focus();
+        if (addVehForm.classList.contains("open")) document.getElementById(prefix + "-model").focus();
       });
     }
-    var vSubmit = document.getElementById("detail-submit");
+    if (bulkBtn) {
+      bulkBtn.addEventListener("click", function () {
+        addVehForm.classList.remove("open");
+        bulkForm.classList.toggle("open");
+        if (bulkForm.classList.contains("open")) document.getElementById(prefix + "-bulkText").focus();
+      });
+    }
+    var vSubmit = document.getElementById(prefix + "-submit");
     if (vSubmit) {
       vSubmit.addEventListener("click", function () {
-        var model = document.getElementById("detail-model").value.trim();
-        if (!model) { document.getElementById("detail-model").focus(); return; }
-        var from = document.getElementById("detail-from").value.trim();
-        var to = document.getElementById("detail-to").value.trim();
+        var model = document.getElementById(prefix + "-model").value.trim();
+        if (!model) { document.getElementById(prefix + "-model").focus(); return; }
+        var from = document.getElementById(prefix + "-from").value.trim();
+        var to = document.getElementById(prefix + "-to").value.trim();
         it.vehicles = it.vehicles || [];
         it.vehicles.push({ id: makeId(), model: model, from: from, to: to });
-        persist(); toast("Véhicule associé"); renderDetail(); render();
+        logHistory("Véhicule associé", it.ref, it.category, model + (from || to ? " (" + (from || "?") + "–" + (to || "présent") + ")" : ""));
+        persist(); toast("Véhicule associé"); afterChange();
       });
     }
-    detailSheetInner.querySelectorAll("[data-rm-veh]").forEach(function (el) {
+    var bulkSubmit = document.getElementById(prefix + "-bulkSubmit");
+    if (bulkSubmit) {
+      bulkSubmit.addEventListener("click", function () {
+        var raw = document.getElementById(prefix + "-bulkText").value;
+        var parsed = parseVehicleBulk(raw);
+        if (!parsed.length) { toast("Aucun véhicule détecté dans le texte"); return; }
+        it.vehicles = it.vehicles || [];
+        parsed.forEach(function (v) {
+          it.vehicles.push({ id: makeId(), model: v.model, from: v.from, to: v.to });
+        });
+        logHistory("Véhicules associés (lot)", it.ref, it.category, parsed.length + " véhicule(s) : " + parsed.map(function (v) { return v.model; }).join(", "));
+        persist(); toast(parsed.length + " véhicule(s) associé(s)"); afterChange();
+      });
+    }
+    container.querySelectorAll("[data-rm-veh]").forEach(function (el) {
       el.addEventListener("click", function () {
         var vid = el.getAttribute("data-rm-veh");
         it.vehicles = (it.vehicles || []).filter(function (v) { return v.id !== vid; });
-        persist(); toast("Véhicule retiré"); renderDetail(); render();
+        persist(); toast("Véhicule retiré"); afterChange();
       });
     });
   }
@@ -1023,33 +1098,7 @@
       persist(); searchEl.value = ""; toast("Référence supprimée"); render();
     });
 
-    var addVehBtn = document.getElementById("hero-addBtn");
-    var addVehForm = document.getElementById("hero-form");
-    if (addVehBtn) {
-      addVehBtn.addEventListener("click", function () {
-        addVehForm.classList.toggle("open");
-        if (addVehForm.classList.contains("open")) document.getElementById("hero-model").focus();
-      });
-    }
-    var vSubmit = document.getElementById("hero-submit");
-    if (vSubmit) {
-      vSubmit.addEventListener("click", function () {
-        var model = document.getElementById("hero-model").value.trim();
-        if (!model) { document.getElementById("hero-model").focus(); return; }
-        var from = document.getElementById("hero-from").value.trim();
-        var to = document.getElementById("hero-to").value.trim();
-        it.vehicles = it.vehicles || [];
-        it.vehicles.push({ id: makeId(), model: model, from: from, to: to });
-        persist(); toast("Véhicule associé"); render();
-      });
-    }
-    mainEl.querySelectorAll("[data-rm-veh]").forEach(function (el) {
-      el.addEventListener("click", function () {
-        var vid = el.getAttribute("data-rm-veh");
-        it.vehicles = (it.vehicles || []).filter(function (v) { return v.id !== vid; });
-        persist(); toast("Véhicule retiré"); render();
-      });
-    });
+    bindVehicleForms(it, "hero", mainEl, function () { render(); });
   }
 
   // ---------- add / edit sheet ----------
