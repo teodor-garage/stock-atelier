@@ -417,7 +417,11 @@
     </div>
     <div class="field"><label for="fCat">Catégorie</label><input id="fCat" type="text" list="catList" placeholder="ex : Filtre habitacle"><datalist id="catList"></datalist></div>
     <div class="field"><label for="fQty">Quantité en stock</label><input id="fQty" type="number" inputmode="numeric" min="0" step="1" placeholder="0"></div>
-    <div class="field"><label for="fBarcode">Code-barres (optionnel)</label><input id="fBarcode" type="text" inputmode="numeric" placeholder="scanné ou tapé manuellement"></div>
+    <div class="field">
+      <label for="fBarcode">Code-barres (optionnel)</label>
+      <input id="fBarcode" type="text" inputmode="numeric" placeholder="scanné ou tapé manuellement">
+      <div id="fBarcodeSearch" style="margin-top:6px"></div>
+    </div>
     <div class="sheet-actions"><button class="secondary" id="sheetCancel">Annuler</button><button class="primary" id="sheetSave">Enregistrer</button></div>
   </div>
 </div>
@@ -1038,12 +1042,17 @@
       fBarcode.value = pendingBarcode || "";
       if (prefillRef) checkRefDup();
     }
+    var searchLink = document.getElementById("fBarcodeSearch");
+    searchLink.innerHTML = fBarcode.value.trim()
+      ? '<a href="https://www.google.com/search?q=' + encodeURIComponent(fBarcode.value.trim()) + '" target="_blank" rel="noopener" class="link-btn" style="display:inline-block">🔎 Chercher ce code sur Google</a>'
+      : "";
     pendingBarcode = "";
     backdrop.classList.add("open");
     setTimeout(function () { (id ? fQty : fRef).focus(); }, 50);
   }
   function closeSheet() { backdrop.classList.remove("open"); editingId = null; }
   fRef.addEventListener("input", checkRefDup);
+  fRef.addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); document.getElementById("sheetSave").click(); } });
 
   var addChoiceBackdrop = document.getElementById("addChoiceBackdrop");
   document.getElementById("addFab").addEventListener("click", function () { addChoiceBackdrop.classList.add("open"); });
